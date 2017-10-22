@@ -41,7 +41,7 @@ Song        EQU    .
             ; the numerator and denominator in the expression comes from the midi file and just using these numbers raw will result in
             ; quite nasty drift between tracks. 
             ;
-            ; the simplest thing to do is to quantise the midi song ( in anvil studio in my case ) to - say - 1/32s, so making the expression
+            ; the simplest thing to do is to quantise the midi song ( e.g. in  http://anvilstudio.com/ ) to - say - 1/32s, so making the expression
             ; below:
             ;
             ; delta_time_in_interrupts = ( quarter_note_divisor*4*x/32  )/ quater_note_divisor * quarter_note_length_in_interrupts
@@ -49,12 +49,14 @@ Song        EQU    .
             ;                           
             ; 
             ; .. so as long quarter note length used for playback is exactly divisible by 8 ( for quantisation of 1/32 ) then all will be well
-            ; for PAL, a quarter note length of 24 interrupts ( 24/50s ) has the right properties and gives a bpm of 125. For higher bpm,
-            ; need coarse quantisation.
+            ; for PAL, a quarter note length of 24 interrupts ( 24/50s ) gives a bpm of 125. For higher bpm, need coarser quantisation. for
+            ; 148 bpm, a quarter note of 20/50 gives 150bpm, but 20 is not exactly divisible by 8, so error will appear unless quantisation is
+            ; made coarser - i.e. to 1/16, giving a division of 20 by 4. For the zelda theme quantising to sixteenths distorted the music too
+            ; much so kept it at the slower 125bpm.
             ;
-            ; this means that tempo in the file is not respected ( zelda is 148bpm, so this is quite a bit slower), but quantising to 1/16 
-            ; changed the song too much. 
-
+            ; of course, these problems can be made to go away if placback is not locked to the interrupt and timing was done by spinning the cpu
+            ; but this be less useful.
+            
 
 
             include "overworld.asm"
@@ -124,7 +126,7 @@ shadmix:    db $ff
 
             ; start playing a new song. ix = pointer to new song definition
 
-strtSong:   di                      ; disable interupts as we are going to changing the currently playing song 
+strtSong:   di                      ; disable interupts as we are going to change the currently playing song 
             ld hl, tracks
             ld b,4                  ; always supply 4 tracks ( but pointers can be null)
             ld c,1                  ; c holds mask for current track
@@ -164,7 +166,7 @@ strtSong0:  ld d, (ix+dTrack0+1)    ; load de with pointer to track
             ld      e, a
             ld      (shadmix),a     ; also keep this is a shadow register so we don't need to read it from the chip
             call    outer
-            ei
+            ei                      ; all done - reenable interrupts
             ret  
 
             ; is there a song currently playing? carry flag set on return if true
@@ -222,8 +224,11 @@ turnoff:    ld a,(shadmix)
 
 trckindex:  db 0
 
-            ; play the current song. ix = current tracks
-            ; This routine runs as the ISR and updates the song every 1/50s
+            ; play the current song. ix = current track
+            ; This routine runs as the ISR and updates the song every 1/50s - tracks are in a very crude
+            ; midi-like format where - like midi - events are interleaved with timing deltas. There are only
+            ; three events, note on, which sets the pitch of the channel (unless noise) and turns it on,
+            ; note off - which disables the channel - and track end, which stops the track from playing. 
 
 playsong:   xor a                         
             ld (trckindex),a              ; set current track to 0
@@ -241,7 +246,7 @@ play2:      ld h,(ix+dTrackPtr+1)         ; get the pointer into the track
 
 play6:      ld a,(hl)                     ; load next event
             cp $ff                        ; end track event?
-            jr nz, play1                  ; not end track event
+            jr nz, play1                  ; not end track event, is it note off?
 
             xor a                         ; end of track, null pointer ..
             ld (ix+dTrackPtr), a
